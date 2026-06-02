@@ -5,7 +5,8 @@ fold-level metrics to JSON.
 
 Usage:
   python scripts/run_ablation_suite.py --hrv_dir data/processed/hrv --tda_dir data/processed/tda \
-      --labels configs/training_labels.csv --outdir experiments/ablations --seq_len 5
+      --labels configs/training_labels.csv --outdir experiments/ablations \
+      --model nn --arch bilstm --mode fusion
 """
 import os
 import argparse
@@ -55,6 +56,12 @@ def main():
     parser.add_argument('--labels', required=True)
     parser.add_argument('--outdir', required=True)
     parser.add_argument('--seq_len', type=int, default=5)
+    
+    # --- NEW ARGUMENTS FOR 1-BY-1 EXECUTION ---
+    parser.add_argument('--model', choices=['rf', 'nn'], help="Filter by model type")
+    parser.add_argument('--arch', choices=['bilstm', 'tst', 'mlp'], help="Filter by architecture")
+    parser.add_argument('--mode', choices=['hrv', 'tda', 'fusion'], help="Filter by feature mode")
+    
     args = parser.parse_args()
 
     os.makedirs(args.outdir, exist_ok=True)
@@ -68,10 +75,31 @@ def main():
     hrv_dim = discover_shape(args.hrv_dir, default_dim=9)
     tda_dim = discover_shape(args.tda_dir, default_dim=256)
 
-    results = {}
+    # --- FILTER THE ABLATIONS LIST BASED ON USER INPUT ---
+    ablations_to_run = []
     for model_type, arch, mode in ABLATIONS:
+        if args.model and model_type != args.model:
+            continue
+        
+        current_arch = arch or 'mlp'
+        if args.arch and current_arch != args.arch:
+            continue
+            
+        if args.mode and mode != args.mode:
+            continue
+            
+        ablations_to_run.append((model_type, arch, mode))
+
+    if not ablations_to_run:
+        print("No configurations matched your filters. Exiting.")
+        return
+
+    print(f"Queueing {len(ablations_to_run)} configuration(s) for training...")
+
+    results = {}
+    for model_type, arch, mode in ablations_to_run:
         name = f"{model_type}_{arch or 'mlp'}_{mode}"
-        print(name)
+        print(f"\n========== RUNNING: {name} ==========")
         out = os.path.join(args.outdir, name)
         os.makedirs(out, exist_ok=True)
 
@@ -96,12 +124,22 @@ def main():
             results[name] = res[2]
         except Exception as e:
             results[name] = {'error': str(e)}
-            print("no cv")
+            print(f"Error during CV for {name}: {e}")
 
-    # save summary
-    with open(os.path.join(args.outdir, 'ablation_summary.json'), 'w') as f:
+    # --- UPDATE SUMMARY JSON INSTEAD OF OVERWRITING ---
+    summary_path = os.path.join(args.outdir, 'ablation_summary.json')
+    if os.path.exists(summary_path):
+        with open(summary_path, 'r') as f:
+            try:
+                existing_results = json.load(f)
+                existing_results.update(results)
+                results = existing_results
+            except json.JSONDecodeError:
+                pass # file is corrupted/empty, just overwrite it
+
+    with open(summary_path, 'w') as f:
         json.dump(results, f, indent=2)
-    print('Ablation suite complete. Summary written to', os.path.join(args.outdir, 'ablation_summary.json'))
+    print('\nExecution complete. Summary updated at:', summary_path)
 
 
 if __name__ == '__main__':
