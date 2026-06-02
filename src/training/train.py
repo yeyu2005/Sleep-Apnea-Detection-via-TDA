@@ -124,6 +124,7 @@ def train_nn(X_train, y_train, X_val, y_val, outpath, config):
     if torch is None:
         raise RuntimeError('PyTorch is required for NN training')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(device)
     # support tuple input (HRV_seq, TDA_seq) for fusion sequence models
     is_sequence = False
     use_fusion = False
@@ -152,7 +153,7 @@ def train_nn(X_train, y_train, X_val, y_val, outpath, config):
         pos_weight = float(config['pos_weight'])
     else:
         pos_weight = (len(y_train) - y_train.sum()) / max(1, y_train.sum())
-    criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(pos_weight, device=device))
+    criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight], dtype=torch.float32, device=device))
     if use_fusion:
         train_ds = TensorDataset(torch.from_numpy(X_train_hrv).float(), torch.from_numpy(X_train_tda).float(), torch.from_numpy(y_train).float())
         val_ds = TensorDataset(torch.from_numpy(X_val_hrv).float(), torch.from_numpy(X_val_tda).float(), torch.from_numpy(y_val).float())
@@ -247,7 +248,6 @@ def evaluate_preds(y_true, y_pred, y_prob=None):
 
 def run_group_cv(hrv_dir, tda_dir, labels_csv, outdir, model_type='rf', n_splits=5, config=None):
     X_hrv, X_tda, y, groups, fnames = load_feature_matrices(hrv_dir, tda_dir, labels_csv)
-    # do not pre-concatenate features here; build per-split to avoid leakage
     gkf = GroupKFold(n_splits=n_splits)
     os.makedirs(outdir, exist_ok=True)
     fold_metrics_window = []
@@ -256,29 +256,25 @@ def run_group_cv(hrv_dir, tda_dir, labels_csv, outdir, model_type='rf', n_splits
     for fold, (train_idx, val_idx) in enumerate(gkf.split(X_hrv, y, groups)):
         y_train, y_val = y[train_idx], y[val_idx]
 
-        # If sequence model requested, build sequences per-group
         arch = (config or {}).get('arch', 'mlp')
         seq_len = (config or {}).get('seq_len', None)
-
         is_sequence_model = arch in ('bilstm', 'tst') and seq_len is not None
 
         if is_sequence_model:
-            # build sequences separately for HRV and TDA from the full per-window arrays
+            # Updated to track and return sequence-level patient groups
             def build_sequences_pair(X_hrv_all, X_tda_all, y_all, groups_all, sel_idx, seq_len, stride=1):
                 seqs_hrv = []
                 seqs_tda = []
                 labels = []
+                seq_groups = [] # Track patient IDs for the newly formed sequences
                 grp_ids = np.unique(groups_all[sel_idx])
                 for g in grp_ids:
-                    # indices for this group within selected indices
                     idx_all = np.where(groups_all == g)[0]
-                    # intersect with sel_idx and keep order
                     idx = idx_all[np.isin(idx_all, sel_idx)]
                     idx = np.sort(idx)
                     Xg_hrv = X_hrv_all[idx]
                     Xg_tda = X_tda_all[idx]
                     yg = y_all[idx]
-                    # sliding-window sequences with configurable stride (default 1)
                     for i in range(0, max(1, len(idx)), stride):
                         bh = Xg_hrv[i:i+seq_len]
                         bt = Xg_tda[i:i+seq_len]
@@ -292,226 +288,145 @@ def run_group_cv(hrv_dir, tda_dir, labels_csv, outdir, model_type='rf', n_splits
                             bt = np.vstack([bt, pt])
                         seqs_hrv.append(bh)
                         seqs_tda.append(bt)
-                        # label mode: 'last' -> last window in sequence (causal)
-                        #             'center' -> center window (offline, bidirectional)
+                        
                         label_mode = (config or {}).get('label_mode', 'last')
-                        if label_mode == 'center':
-                            offset = seq_len // 2
-                            lbl_idx = min(i + offset, len(yg)-1)
-                        else:
-                            lbl_idx = min(i + seq_len - 1, len(yg)-1)
+                        lbl_idx = min(i + seq_len // 2, len(yg)-1) if label_mode == 'center' else min(i + seq_len - 1, len(yg)-1)
                         labels.append(int(yg[lbl_idx]))
+                        seq_groups.append(g) # Map sequence to patient ID
+                        
                 if len(seqs_hrv) == 0:
-                    return np.zeros((0, seq_len, X_hrv_all.shape[1])), np.zeros((0, seq_len, X_tda_all.shape[1])), np.array([])
-                return np.stack(seqs_hrv), np.stack(seqs_tda), np.array(labels)
+                    return np.zeros((0, seq_len, X_hrv_all.shape[1])), np.zeros((0, seq_len, X_tda_all.shape[1])), np.array([]), np.array([])
+                return np.stack(seqs_hrv), np.stack(seqs_tda), np.array(labels), np.array(seq_groups)
 
             seq_stride = (config or {}).get('seq_stride', 1)
-            X_train_seq_hrv, X_train_seq_tda, y_train_seq = build_sequences_pair(X_hrv, X_tda, y, groups, train_idx, seq_len, stride=seq_stride)
-            X_val_seq_hrv, X_val_seq_tda, y_val_seq = build_sequences_pair(X_hrv, X_tda, y, groups, val_idx, seq_len, stride=seq_stride)
+            X_train_seq_hrv, X_train_seq_tda, y_train_seq, train_seq_groups = build_sequences_pair(X_hrv, X_tda, y, groups, train_idx, seq_len, stride=seq_stride)
+            X_val_seq_hrv, X_val_seq_tda, y_val_seq, val_seq_groups = build_sequences_pair(X_hrv, X_tda, y, groups, val_idx, seq_len, stride=seq_stride)
 
-            # fit separate scalers per-feature-stream on flattened timesteps
             hrv_dim = X_train_seq_hrv.shape[2]
             tda_dim = X_train_seq_tda.shape[2]
             hrv_flat_train = X_train_seq_hrv.reshape(-1, hrv_dim)
             tda_flat_train = X_train_seq_tda.reshape(-1, tda_dim)
+            
             hrv_scaler = StandardScaler()
             tda_scaler = MinMaxScaler(feature_range=(0, 1))
             hrv_scaler.fit(hrv_flat_train)
             tda_scaler.fit(tda_flat_train)
 
-            # transform training flattened and reshape back
-            hrv_flat_train_s = hrv_scaler.transform(hrv_flat_train).reshape(X_train_seq_hrv.shape)
-            tda_flat_train_s = tda_scaler.transform(tda_flat_train).reshape(X_train_seq_tda.shape)
+            X_train_s_hrv = hrv_scaler.transform(hrv_flat_train).reshape(X_train_seq_hrv.shape)
+            X_train_s_tda = tda_scaler.transform(tda_flat_train).reshape(X_train_seq_tda.shape)
 
-            # transform validation flattened and reshape back
             hrv_flat_val = X_val_seq_hrv.reshape(-1, hrv_dim)
             tda_flat_val = X_val_seq_tda.reshape(-1, tda_dim)
-            hrv_flat_val_s = hrv_scaler.transform(hrv_flat_val).reshape(X_val_seq_hrv.shape)
-            tda_flat_val_s = tda_scaler.transform(tda_flat_val).reshape(X_val_seq_tda.shape)
-
-            X_train_s_hrv = hrv_flat_train_s
-            X_train_s_tda = tda_flat_train_s
-            X_val_s_hrv = hrv_flat_val_s
-            X_val_s_tda = tda_flat_val_s
+            X_val_s_hrv = hrv_scaler.transform(hrv_flat_val).reshape(X_val_seq_hrv.shape)
+            X_val_s_tda = tda_scaler.transform(tda_flat_val).reshape(X_val_seq_tda.shape)
         else:
-            # scale HRV and TDA separately to avoid destroying PI sparsity
-            X_hrv_train = X_hrv[train_idx]
-            X_tda_train = X_tda[train_idx]
-            X_hrv_val = X_hrv[val_idx]
-            X_tda_val = X_tda[val_idx]
+            X_hrv_train, X_tda_train = X_hrv[train_idx], X_tda[train_idx]
+            X_hrv_val, X_tda_val = X_hrv[val_idx], X_tda[val_idx]
 
             hrv_scaler = StandardScaler()
             tda_scaler = MinMaxScaler(feature_range=(0, 1))
             hrv_scaler.fit(X_hrv_train)
             tda_scaler.fit(X_tda_train)
 
-            X_hrv_train_s = hrv_scaler.transform(X_hrv_train)
-            X_tda_train_s = tda_scaler.transform(X_tda_train)
-            X_hrv_val_s = hrv_scaler.transform(X_hrv_val)
-            X_tda_val_s = tda_scaler.transform(X_tda_val)
-
-            X_train_s = np.hstack([X_hrv_train_s, X_tda_train_s])
-            X_val_s = np.hstack([X_hrv_val_s, X_tda_val_s])
+            X_train_s = np.hstack([hrv_scaler.transform(X_hrv_train), tda_scaler.transform(X_tda_train)])
+            X_val_s = np.hstack([hrv_scaler.transform(X_hrv_val), tda_scaler.transform(X_tda_val)])
 
         fold_out = os.path.join(outdir, f'fold_{fold}')
         os.makedirs(fold_out, exist_ok=True)
 
-        # compute per-fold class weights from training labels and apply
         classes = np.unique(y_train)
         cw = compute_class_weight('balanced', classes=classes, y=y_train)
         class_weight_dict = {int(c): float(w) for c, w in zip(classes, cw)}
 
         if model_type == 'rf':
-            clf = RandomForestClassifier(class_weight=class_weight_dict, n_estimators=100)
-            # prepare flattened training data for RF
             if is_sequence_model:
                 X_train_flat = np.concatenate([X_train_s_hrv, X_train_s_tda], axis=2).reshape(X_train_s_hrv.shape[0], -1)
                 y_train_use = y_train_seq
                 X_val_flat = np.concatenate([X_val_s_hrv, X_val_s_tda], axis=2).reshape(X_val_s_hrv.shape[0], -1)
             else:
-                X_train_flat = X_train_s
-                y_train_use = y_train
+                X_train_flat, y_train_use = X_train_s, y_train
                 X_val_flat = X_val_s
+            
+            clf = RandomForestClassifier(class_weight=class_weight_dict, n_estimators=100)
             clf.fit(X_train_flat, y_train_use)
             y_pred = clf.predict(X_val_flat)
-            try:
-                y_prob = clf.predict_proba(X_val_flat)[:,1]
-            except Exception:
-                y_prob = None
-                print("y_prob nan")
-            # save model and scalers
-            try:
-                joblib.dump({'model': clf, 'hrv_scaler': hrv_scaler, 'tda_scaler': tda_scaler}, os.path.join(fold_out, 'rf.joblib'))
-            except Exception:
-                joblib.dump({'model': clf}, os.path.join(fold_out, 'rf.joblib'))
-                print("no hrv/tda scaler")
+            y_prob = clf.predict_proba(X_val_flat)[:,1] if hasattr(clf, "predict_proba") else None
+            joblib.dump({'model': clf, 'hrv_scaler': hrv_scaler, 'tda_scaler': tda_scaler}, os.path.join(fold_out, 'rf.joblib'))
         else:
-            # neural network training on scaled features
             nn_out = os.path.join(fold_out, 'nn.pth')
             if is_sequence_model:
-                # compute PyTorch pos_weight as n_neg / n_pos using sequence training labels
                 n_neg = int(np.sum(y_train_seq == 0))
                 n_pos = int(np.sum(y_train_seq == 1))
-                if n_pos <= 0:
-                    pos_weight = 1.0
-                else:
-                    pos_weight = float(n_neg / max(1, n_pos))
+                pos_weight = float(n_neg / max(1, n_pos))
                 c = dict(config or {})
                 c['pos_weight'] = pos_weight
                 train_nn((X_train_s_hrv, X_train_s_tda), y_train_seq, (X_val_s_hrv, X_val_s_tda), y_val_seq, nn_out, c)
             else:
-                # compute PyTorch pos_weight as n_neg / n_pos using training labels
                 n_neg = int(np.sum(y_train == 0))
                 n_pos = int(np.sum(y_train == 1))
-                if n_pos <= 0:
-                    pos_weight = 1.0
-                else:
-                    pos_weight = float(n_neg / max(1, n_pos))
+                pos_weight = float(n_neg / max(1, n_pos))
                 c = dict(config or {})
                 c['pos_weight'] = pos_weight
                 train_nn(X_train_s, y_train, X_val_s, y_val, nn_out, c)
-            # load and evaluate
-            if torch is None:
-                raise RuntimeError('PyTorch required for NN evaluation')
+
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
             if is_sequence_model:
                 from src.models.fusion_model import FusionSequenceModel
-                hrv_dim = X_train_s_hrv.shape[2]
-                tda_dim = X_train_s_tda.shape[2]
-                model = FusionSequenceModel(hrv_dim, tda_dim, fusion_hidden=config.get('fusion_hidden',64), arch=config.get('arch','bilstm'), classifier_kwargs=config)
+                model = FusionSequenceModel(X_train_s_hrv.shape[2], X_train_s_tda.shape[2], fusion_hidden=config.get('fusion_hidden',64), arch=config.get('arch','bilstm'), classifier_kwargs=config)
                 model.load_state_dict(torch.load(nn_out, map_location=device))
-                model.to(device)
-                model.eval()
+                model.to(device).eval()
                 with torch.no_grad():
-                    Xv_hrv = torch.from_numpy(X_val_s_hrv).float().to(device)
-                    Xv_tda = torch.from_numpy(X_val_s_tda).float().to(device)
-                    logits = model(Xv_hrv, Xv_tda)
+                    logits = model(torch.from_numpy(X_val_s_hrv).float().to(device), torch.from_numpy(X_val_s_tda).float().to(device))
                     probs = torch.sigmoid(logits).cpu().numpy()
                     y_pred = (probs >= 0.5).astype(int)
                     y_prob = probs
-                # Save interpretability artifacts: attention weights + sample inputs
-                art_dir = os.path.join(fold_out, 'artifacts')
-                os.makedirs(art_dir, exist_ok=True)
-                try:
-                    # take up to first N sequences for inspection
-                    N = min(50, X_val_s_hrv.shape[0])
-                    batch_size = min(16, N)
-                    from torch.utils.data import DataLoader, TensorDataset
-                    ds = TensorDataset(torch.from_numpy(X_val_s_hrv[:N]).float(), torch.from_numpy(X_val_s_tda[:N]).float())
-                    dl = DataLoader(ds, batch_size=batch_size, shuffle=False)
-                    saved = 0
-                    for bi, batch in enumerate(dl):
-                        hrv_b, tda_b = batch
-                        hrv_b = hrv_b.to(device)
-                        tda_b = tda_b.to(device)
-                        _ = model(hrv_b, tda_b)
-                        # attention weights shape: (batch, seq_len, 1, 1)
-                        att = model.fusion.last_attention()
-                        if att is not None:
-                            att_np = att.cpu().numpy()
-                            np.save(os.path.join(art_dir, f'att_batch_{bi}.npy'), att_np)
-                        # save corresponding inputs (CPU numpy)
-                        np.save(os.path.join(art_dir, f'hrv_batch_{bi}.npy'), hrv_b.cpu().numpy())
-                        np.save(os.path.join(art_dir, f'tda_batch_{bi}.npy'), tda_b.cpu().numpy())
-                        saved += hrv_b.shape[0]
-                        if saved >= N:
-                            break
-                except Exception:
-                    # non-fatal: skip artifacts if something goes wrong
-                    print("skipped artifacts")
-                    pass
             else:
-                input_dim = X_train_s.shape[1]
-                model = get_model(config.get('arch', 'mlp'), input_dim, config)
+                model = get_model(config.get('arch', 'mlp'), X_train_s.shape[1], config)
                 model.load_state_dict(torch.load(nn_out, map_location=device))
-                model.to(device)
-                model.eval()
+                model.to(device).eval()
                 with torch.no_grad():
-                    Xv = torch.from_numpy(X_val_s).float().to(device)
-                    logits = model(Xv)
+                    logits = model(torch.from_numpy(X_val_s).float().to(device))
                     probs = torch.sigmoid(logits).cpu().numpy()
                     y_pred = (probs >= 0.5).astype(int)
                     y_prob = probs
 
-        metrics = evaluate_preds(y_val, y_pred, y_prob)
+        # Dynamically point target references based on configuration mode
+        eval_true = y_val_seq if is_sequence_model else y_val
+        eval_groups = val_seq_groups if is_sequence_model else groups[val_idx]
+
+        metrics = evaluate_preds(eval_true, y_pred, y_prob)
         fold_metrics_window.append(metrics)
-        # Patient-level aggregation (AHI 10% rule)
-        val_groups = groups[val_idx]
-        patient_true = []
-        patient_pred = []
-        patient_prob = []
-        for p in np.unique(val_groups):
-            mask = (val_idx[np.where(val_idx == val_idx)[0]] if False else val_groups == p)
-            # mask is boolean index over validation set
-            mask = (val_groups == p)
-            true_frac = float(np.mean(y_val[mask])) if mask.any() else 0.0
+
+        # Secure patient-level aggregation against sample length transformations
+        patient_true, patient_pred, patient_prob = [], [], []
+        for p in np.unique(eval_groups):
+            mask = (eval_groups == p)
+            true_frac = float(np.mean(eval_true[mask])) if mask.any() else 0.0
             true_label = int(true_frac >= 0.10)
+            
             if y_prob is not None:
                 win_pred = (y_prob[mask] >= 0.5).astype(int)
                 prob_frac = float(np.mean(y_prob[mask])) if mask.any() else 0.0
             else:
                 win_pred = np.array(y_pred)[mask]
                 prob_frac = float(np.mean(win_pred)) if mask.any() else 0.0
+                
             pred_frac = float(np.mean(win_pred)) if mask.any() else 0.0
             pred_label = int(pred_frac >= 0.10)
+            
             patient_true.append(true_label)
             patient_pred.append(pred_label)
             patient_prob.append(prob_frac)
 
-        if len(patient_true) > 0:
-            patient_metrics = evaluate_preds(np.array(patient_true), np.array(patient_pred), np.array(patient_prob))
-        else:
-            patient_metrics = {'accuracy': float('nan'), 'f1': float('nan'), 'auc': float('nan'), 'sensitivity': float('nan')}
+        patient_metrics = evaluate_preds(np.array(patient_true), np.array(patient_pred), np.array(patient_prob)) if patient_true else {}
         fold_metrics_patient.append(patient_metrics)
         print(f'Fold {fold} window metrics: {metrics} | patient metrics: {patient_metrics}')
 
-    # aggregate
-    agg_window = {k: np.mean([m[k] for m in fold_metrics_window if not np.isnan(m[k])]) for k in fold_metrics_window[0]} if len(fold_metrics_window)>0 else {}
-    agg_patient = {k: np.mean([m[k] for m in fold_metrics_patient if not np.isnan(m[k])]) for k in fold_metrics_patient[0]} if len(fold_metrics_patient)>0 else {}
+    agg_window = {k: np.mean([m[k] for m in fold_metrics_window if not np.isnan(m[k])]) for k in fold_metrics_window[0]} if fold_metrics_window else {}
+    agg_patient = {k: np.mean([m[k] for m in fold_metrics_patient if not np.isnan(m[k])]) for k in fold_metrics_patient[0]} if fold_metrics_patient else {}
     print('Cross-validation mean window metrics:', agg_window)
     print('Cross-validation mean patient metrics:', agg_patient)
     return fold_metrics_window, fold_metrics_patient, {'window': agg_window, 'patient': agg_patient}
-
 
 def main():
     parser = argparse.ArgumentParser()
