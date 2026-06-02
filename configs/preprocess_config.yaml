@@ -1,0 +1,5 @@
+fs: 100
+bandpass_low: 0.5
+bandpass_high: 40
+notch_freq: 50  # set to 60 if your mains is 60Hz
+window_seconds: 60

@@ -1,0 +1,5 @@
+embedding_dim: 10
+pi_grid: 32
+pi_sigma: 0.1
+sample_windows_for_tuning: 1000
+tau: 3
