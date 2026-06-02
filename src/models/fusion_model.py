@@ -35,4 +35,3 @@ class FusionSequenceModel(nn.Module):
         # pass to classifier
         logits = self.classifier(fused)
         return logits
-*** End Patch
