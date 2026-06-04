@@ -98,3 +98,4 @@ Raw Persistence Diagrams: You can pass save_diagrams=True to cache_persistence_i
 
 ## Running Tests
 Run the unit test suite to verify interpolation logic and mathematical boundaries:
+pytest -q
