@@ -70,7 +70,7 @@ Results, metrics (F1, AUC, Sensitivity), and hardware performance logs are saved
 ## 4. Robustness & Wearable Feasibility
 To test the pipeline's viability for deployment on consumer smartwatches, we provide scripts to generate degraded datasets mirroring motion artifacts and low sampling rates.
 
-### Raw ECG Degradation (Recommended):
+### Raw ECG Degradation:
 Injects Gaussian noise (mV) directly into the filtered ECG and downsamples the Hz rate before re-running R-peak detection.
 
 python scripts/generate_ecg_robustness.py --interim data/interim --out data/processed/robustness --noise 0.1 0.2 --downsample 50 25
@@ -79,11 +79,13 @@ python scripts/generate_ecg_robustness.py --interim data/interim --out data/proc
 ### RR Interval Degradation:
 Directly degrades the extracted RR intervals.
 
-python scripts/generate_robustness_variants.py --base data/processed/sample --noise 5 10 20 --downsample 2 3
+python scripts/generate_robustness_variants.py --rr_dir data/processed/rr_windows --out_dir data/processed/robustness --noise 10 20 --downsample 2 3
+
+
 
 
 ### Analyze Drop in Performance:
-python scripts/analyze_robustness.py --base data/processed/sample --out robustness_summary.csv
+python scripts/analyze_robustness.py --orig_hrv data/processed/hrv --rob_dir data/processed/robustness --out experiments/ablations/robustness_summary.csv
 
 
 
