@@ -12,11 +12,10 @@ from src.features.takens import estimate_takens_params
 
 
 def compute_median(rr_dir, sample_n=100):
-    all_files = sorted(glob.glob(os.path.join(rr_dir, '*.npy')))
-    train_files = [f for f in all_files if not os.path.basename(f).startswith('x')]
+    files = sorted(glob.glob(os.path.join(rr_dir, '*.npy')))
     if len(files) == 0:
         raise RuntimeError('No rr windows found in ' + rr_dir)
-    files = train_files[:sample_n]
+    files = files[:sample_n]
     taus = []
     dims = []
     for f in files:
