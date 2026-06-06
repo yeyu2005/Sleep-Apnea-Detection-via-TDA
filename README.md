@@ -3,7 +3,7 @@
 ## Short Overview
 This repository implements the **Topo‑ECG** pipeline for the PhysioNet Apnea‑ECG database. It provides an end-to-end framework including raw ECG ingestion, noise filtering, R‑peak detection, cubic spline RR interpolation, and feature extraction. 
 
-The core novelty is a dual-stream architecture that fuses **Traditional HRV features** (time/frequency/non-linear domains) with **Topological Data Analysis (TDA)** features (Persistence Images extracted via Takens embedding and Vietoris-Rips filtration). Fused features are evaluated using Random Forest, BiLSTM, and Time Series Transformer models via strict patient-level GroupKFold cross-validation.
+The core novelty is a dual-stream architecture that fuses **Traditional HRV features** (time/frequency/non-linear domains) with **Topological Data Analysis (TDA)** features (Persistence Images extracted via Takens embedding and Vietoris-Rips filtration). Fused features are evaluated using Random Forest, BiLSTM, and Time Series Transformer models.
 
 ---
 
@@ -17,20 +17,20 @@ source .venv/bin/activate  # Windows: .\.venv\Scripts\activate
 
 ### Install dependencies
 pip install -U pip
-pip install giotto-tda neurokit2 wfdb torch torchvision torchaudio scikit-learn pandas numpy scipy matplotlib
+pip install giotto-tda neurokit2 wfdb torch torchvision torchaudio scikit-learn pandas numpy scipy matplotlib ptflops
 
 
 ## 2. Data Preparation
 Download the PhysioNet Apnea-ECG Database.
 
 Place all .dat, .hea, and .apn files directly into the data/raw/ directory.
-file structure: 
-data/raw
-data/interim
-data/processed
-(Note: The official test set records x01 through x35 do not have public .apn files provided in the standard zip. They must be evaluated separately or omitted during cross-validation).
+Ensure you download both the training set (a01–c03) and the withheld test set (x01–x35), including the released .apn ground-truth labels for the x records.
 
-
+Required Folder Structure:
+data/
+├── raw/         # Place all PhysioNet .dat, .hea, and .apn files here
+├── interim/     # Auto-generated: filtered ECG signals and detected R-peaks
+└── processed/   # Auto-generated: HRV features, TDA images, and robust variants
 
 ## 3. The End-to-End Execution Pipeline
 Run these commands in strict sequential order from the root of the repository to train the models.
@@ -48,10 +48,11 @@ python scripts/extract_all_features.py
 
 
 ### Step 3: Topological Parameter Tuning
-Calculates the optimal Time Delay ($\tau$) via Average Mutual Information and Embedding Dimension ($d$) via False Nearest Neighbors for the Takens Phase Space reconstruction. Updates configs/tda_config.yaml.
+Calculates the optimal Time Delay ($\tau$) via Average Mutual Information and Embedding Dimension ($d$) via False Nearest Neighbors for the Takens Phase Space reconstruction.
+Note: To prevent data leakage, this script strictly samples from the training cohort and ignores the x test records.
 
 python scripts/compute_takens_median.py
-
+(This automatically updates configs/tda_config.yaml).
 
 ### Step 4: Topological Feature Extraction (Persistence Images)
 Uses giotto-tda to compute persistent homology and caches the flattened 2D Persistence Images to disk. (Ensure the tau and dim arguments match the median values output by Step 3).
@@ -60,33 +61,34 @@ python -c "from src.features.topological import cache_persistence_images; cache_
 
 
 ### Step 5: Run the Machine Learning Ablation Suite
-Executes 5-fold GroupKFold cross-validation (grouped by patient) across all 9 experimental conditions (RF/BiLSTM/TST crossed with HRV/TDA/Fusion).
-
+Executes 5-fold GroupKFold cross-validation (grouped by patient) across the 9 experimental conditions (RF/BiLSTM/TST crossed with HRV/TDA/Fusion) to determine the optimal architecture.
 python scripts/run_ablation_suite.py --hrv_dir data/processed/hrv --tda_dir data/processed/tda --labels configs/training_labels.csv --outdir experiments/ablations --seq_len 5
 
 Results, metrics (F1, AUC, Sensitivity), and hardware performance logs are saved to experiments/ablations/ablation_summary.json.
 
+### Step 6: Final State-of-the-Art Test Set Benchmark
+Locks in the winning architecture (TST Fusion), trains a final model on all training records, and evaluates strictly on the unseen x test cohort.
+
+python scripts/evaluate_test_set.py
 
 ## 4. Robustness & Wearable Feasibility
-To test the pipeline's viability for deployment on consumer smartwatches, we provide scripts to generate degraded datasets mirroring motion artifacts and low sampling rates.
+To prove the pipeline's viability for deployment on consumer smartwatches, we provide scripts to benchmark inference latency and test model robustness against motion artifacts.
 
-### Raw ECG Degradation:
-Injects Gaussian noise (mV) directly into the filtered ECG and downsamples the Hz rate before re-running R-peak detection.
+### 4.1 Edge Inference Benchmarking
+Measures the milliseconds required to process a 1-minute sequence and estimates MACs/FLOPs.
+python scripts/benchmark_inference.py --arch tst --seq_len 5 --iters 100
 
-python scripts/generate_ecg_robustness.py --interim data/interim --out data/processed/robustness --noise 0.1 0.2 --downsample 50 25
-
-
-### RR Interval Degradation:
-Directly degrades the extracted RR intervals.
-
+### 4.2 Generate Degraded Datasets
+Injects severe mathematical noise (e.g., 10ms/20ms jitter) and missing beats (downsampling) directly into the RR intervals to mimic a loose wearable sensor.
 python scripts/generate_robustness_variants.py --rr_dir data/processed/rr_windows --out_dir data/processed/robustness --noise 10 20 --downsample 2 3
 
-
-
-
-### Analyze Drop in Performance:
+### 4.3 Analyze Mathematical Feature Drift
+Calculates how heavily the traditional HRV features degraded under the injected noise.
 python scripts/analyze_robustness.py --orig_hrv data/processed/hrv --rob_dir data/processed/robustness --out experiments/ablations/robustness_summary.csv
 
+### 4.4 Prove Model Resilience (The "Anchor" Effect)
+To prove that Topological features act as a stabilizing anchor against noise, evaluate the Transformer on the degraded dataset:
+python scripts/run_ablation_suite.py --hrv_dir data/processed/robustness/noise_10.0 --tda_dir data/processed/tda --labels configs/training_labels.csv --outdir experiments/robustness_10ms --arch tst
 
 
 ## 5. Interpretability
