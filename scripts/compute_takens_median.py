@@ -41,7 +41,6 @@ def main():
         cfg = yaml.safe_load(f)
     cfg['tau'] = int(tau_med)
     cfg['embedding_dim'] = int(dim_med)
-    
     with open(tda_cfg, 'w') as f:
         yaml.safe_dump(cfg, f)
     print('Updated', tda_cfg)
