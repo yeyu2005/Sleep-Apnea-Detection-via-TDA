@@ -13,7 +13,10 @@ It is highly recommended to use Python 3.10 for compatibility with pre-compiled 
 
 ### Create and activate a virtual environment
 python -m venv .venv
-source .venv/bin/activate  # Windows: .\.venv\Scripts\activate
+
+source .venv/bin/activate  
+
+For Windows: .\.venv\Scripts\activate
 
 ### Install dependencies
 pip install -U pip (or python -m pip install -U pip)
