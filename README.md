@@ -16,7 +16,7 @@ python -m venv .venv
 
 source .venv/bin/activate  
 
-For Windows: .\.venv\Scripts\activate
+For Windows: .venv\Scripts\activate
 
 ### Install dependencies
 pip install -U pip (or python -m pip install -U pip)
