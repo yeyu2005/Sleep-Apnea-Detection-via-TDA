@@ -16,8 +16,10 @@ python -m venv .venv
 source .venv/bin/activate  # Windows: .\.venv\Scripts\activate
 
 ### Install dependencies
-pip install -U pip
-pip install giotto-tda neurokit2 wfdb torch torchvision torchaudio scikit-learn pandas numpy scipy matplotlib ptflops
+pip install -U pip (or python -m pip install -U pip)
+then (python-m) python -m pip install PyYAML giotto-tda neurokit2 wfdb scikit-learn pandas numpy scipy matplotlib ptflops torch==2.1.2+cpu torchvision==0.16.2+cpu torchaudio==2.1.2+cpu --index-url https://download.pytorch.org/whl/cpu
+
+
 
 
 ## 2. Data Preparation
