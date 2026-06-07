@@ -17,7 +17,8 @@ source .venv/bin/activate  # Windows: .\.venv\Scripts\activate
 
 ### Install dependencies
 pip install -U pip (or python -m pip install -U pip)
-then (python-m) python -m pip install PyYAML giotto-tda neurokit2 wfdb scikit-learn pandas numpy scipy matplotlib ptflops torch==2.1.2+cpu torchvision==0.16.2+cpu torchaudio==2.1.2+cpu --index-url https://download.pytorch.org/whl/cpu
+
+Then (python-m) pip install PyYAML giotto-tda neurokit2 wfdb scikit-learn pandas numpy scipy matplotlib ptflops torch==2.1.2+cpu torchvision==0.16.2+cpu torchaudio==2.1.2+cpu --index-url https://download.pytorch.org/whl/cpu
 
 
 
@@ -26,7 +27,7 @@ then (python-m) python -m pip install PyYAML giotto-tda neurokit2 wfdb scikit-le
 Download the PhysioNet Apnea-ECG Database.
 
 Place all .dat, .hea, and .apn files directly into the data/raw/ directory.
-Ensure you download both the training set (a01–c03) and the withheld test set (x01–x35), including the released .apn ground-truth labels for the x records.
+Ensure you download both the training set (a01–c03) and the withheld test set (x01–x35), including the released .apn ground-truth labels for the x records. The latter should be downloaded manually, as they are not included in the ZIP file
 
 Required Folder Structure:
 
@@ -55,6 +56,7 @@ python scripts/extract_all_features.py
 
 ### Step 3: Topological Parameter Tuning
 Calculates the optimal Time Delay ($\tau$) via Average Mutual Information and Embedding Dimension ($d$) via False Nearest Neighbors for the Takens Phase Space reconstruction.
+
 Note: To prevent data leakage, this script strictly samples from the training cohort and ignores the x test records.
 
 python scripts/compute_takens_median.py
@@ -68,6 +70,7 @@ python -c "from src.features.topological import cache_persistence_images; cache_
 
 ### Step 5: Run the Machine Learning Ablation Suite
 Executes 5-fold GroupKFold cross-validation (grouped by patient) across the 9 experimental conditions (RF/BiLSTM/TST crossed with HRV/TDA/Fusion) to determine the optimal architecture.
+
 python scripts/run_ablation_suite.py --hrv_dir data/processed/hrv --tda_dir data/processed/tda --labels configs/training_labels.csv --outdir experiments/ablations --seq_len 5
 
 Results, metrics (F1, AUC, Sensitivity), and hardware performance logs are saved to experiments/ablations/ablation_summary.json.
@@ -78,31 +81,35 @@ Locks in the winning architecture (TST Fusion), trains a final model on all trai
 python scripts/evaluate_test_set.py
 
 ## 4. Robustness & Wearable Feasibility
-To prove the pipeline's viability for deployment on consumer smartwatches, we provide scripts to benchmark inference latency and test model robustness against motion artifacts.
+To prove the pipeline's viability for deployment on consumer smartwatches and other devices, we provide scripts to benchmark inference latency and test model robustness against motion artifacts.
 
 ### 4.1 Edge Inference Benchmarking
 Measures the milliseconds required to process a 1-minute sequence and estimates MACs/FLOPs.
+
 python scripts/benchmark_inference.py --arch tst --seq_len 5 --iters 100
 
 ### 4.2 Generate Degraded Datasets
 Injects severe mathematical noise (e.g., 10ms/20ms jitter) and missing beats (downsampling) directly into the RR intervals to mimic a loose wearable sensor.
+
 python scripts/generate_robustness_variants.py --rr_dir data/processed/rr_windows --out_dir data/processed/robustness --noise 10 20 --downsample 2 3
 
 ### 4.3 Analyze Mathematical Feature Drift
 Calculates how heavily the traditional HRV features degraded under the injected noise.
+
 python scripts/analyze_robustness.py --orig_hrv data/processed/hrv --rob_dir data/processed/robustness --out experiments/ablations/robustness_summary.csv
 
 ### 4.4 Prove Model Resilience (The "Anchor" Effect)
-To prove that Topological features act as a stabilizing anchor against noise, evaluate the Transformer on the degraded dataset:
+To prove that Topological features act as a stabilizing anchor against noise, evaluate the Transformer on the degraded dataset.
+
 python scripts/run_ablation_suite.py --hrv_dir data/processed/robustness/noise_10.0 --tda_dir data/processed/tda --labels configs/training_labels.csv --outdir experiments/robustness_10ms --arch tst
 
 
 ## 5. Interpretability
-To satisfy clinical explainability requirements:
+The following results can be used to satisfy clinical explainability requirements:
 
-Attention Weights: During the evaluation of the fusion sequence models (BiLSTM and TST), the attention layer weights are automatically saved to experiments/ablations/fold_{k}/artifacts/. These demonstrate whether the model relied more on traditional HRV or Topological features for a specific minute.
+- Attention Weights: During the evaluation of the fusion sequence models (BiLSTM and TST), the attention layer weights are automatically saved to experiments/ablations/fold_{k}/artifacts/. These demonstrate whether the model relied more on traditional HRV or Topological features for a specific minute.
 
-Raw Persistence Diagrams: You can pass save_diagrams=True to cache_persistence_images() in Step 4 to save the raw _dgm.npy files for plotting the 0D and 1D topological birth/death cycles.
+- Raw Persistence Diagrams: You can pass save_diagrams=True to cache_persistence_images() in Step 4 to save the raw _dgm.npy files for plotting the 0D and 1D topological birth/death cycles.
 
 ## Running Tests
 Run the unit test suite to verify interpolation logic and mathematical boundaries:
