@@ -27,7 +27,9 @@ Place all .dat, .hea, and .apn files directly into the data/raw/ directory.
 Ensure you download both the training set (a01–c03) and the withheld test set (x01–x35), including the released .apn ground-truth labels for the x records.
 
 Required Folder Structure:
+
 data/
+
 ├── raw/         # Place all PhysioNet .dat, .hea, and .apn files here
 
 ├── interim/     # Auto-generated: filtered ECG signals and detected R-peaks
