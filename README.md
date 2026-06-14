@@ -91,17 +91,7 @@ Measures the milliseconds required to process a 1-minute sequence and estimates 
 
 python scripts/benchmark_inference.py --arch tst --seq_len 5 --iters 100
 
-### 4.2 Generate Degraded Datasets
-Injects severe mathematical noise (e.g., 10ms/20ms jitter) and missing beats (downsampling) directly into the RR intervals to mimic a loose wearable sensor.
-
-python scripts/generate_robustness_variants.py --rr_dir data/processed/rr_windows --out_dir data/processed/robustness --noise 10 20 --downsample 2 3
-
-### 4.3 Analyze Mathematical Feature Drift
-Calculates how heavily the traditional HRV features degraded under the injected noise.
-
-python scripts/analyze_robustness.py --orig_hrv data/processed/hrv --rob_dir data/processed/robustness --out experiments/ablations/robustness_summary.csv
-
-### 4.4 Prove Model Resilience
+### 4.2 Prove Model Resilience
 To prove that Topological features act as a stabilizing anchor against noise, we evaluate the finalized models against severely degraded signals on the unseen test set. This script dynamically zero-imputes destroyed 1-minute segments to preserve the chronological timeline, mimicking a "blank signal" from a smartwatch losing skin contact.
 
 First, generate the 50% signal loss dataset:
