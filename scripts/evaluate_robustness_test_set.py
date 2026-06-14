@@ -59,7 +59,7 @@ def load_feature_matrices_robust(hrv_dir, tda_dir, labels_csv):
                     valid = True
             except: pass
 
-        # THE FIX: If the file is corrupted/missing, simulate a blank smartwatch signal
+        # If the file is corrupted/missing, simulate a blank smartwatch signal
         if not valid:
             missing_count += 1
             X_hrv.append(np.zeros(expected_h_dim, dtype=np.float32))
