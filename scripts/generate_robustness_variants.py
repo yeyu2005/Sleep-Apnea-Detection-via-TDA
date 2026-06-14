@@ -37,10 +37,6 @@ def process_folder(rr_dir, out_base, noise_levels, downsample_factors, tau, dim,
     print(f"Found {len(rr_files)} RR windows. Generating True Robustness variants...")
     
     count = 0
-    # Expected dimensions to prevent crashes (32 * 32 * 2 = 2048)
-    expected_tda_dim = grid_size * grid_size * 2
-    expected_hrv_dim = 9
-
     for f in rr_files:
         name = os.path.splitext(os.path.basename(f))[0]
         rr = np.load(f)
@@ -50,45 +46,31 @@ def process_folder(rr_dir, out_base, noise_levels, downsample_factors, tau, dim,
             noisy = add_noise(rr, sigma)
             od = os.path.join(out_base, f'noise_{sigma}')
             os.makedirs(od, exist_ok=True)
+            
+            # Save Noisy RR
             np.save(os.path.join(od, f'{name}_rr.npy'), noisy)
             
-            # Safe Noisy HRV
-            try:
-                n_hrv = extract_hrv_features(noisy)
-            except:
-                n_hrv = np.zeros(expected_hrv_dim)
-            np.save(os.path.join(od, f'{name}_hrv.npy'), n_hrv)
+            # Extract and Save Noisy HRV
+            np.save(os.path.join(od, f'{name}_hrv.npy'), extract_hrv_features(noisy))
             
-            # Safe Noisy TDA
-            try:
-                n_pi = compute_persistence_image(noisy, tau=tau, dim=dim, grid_size=grid_size)
-                if len(n_pi) != expected_tda_dim:
-                    n_pi = np.zeros(expected_tda_dim)
-            except:
-                n_pi = np.zeros(expected_tda_dim)
-            np.save(os.path.join(od, f'{name}_pi.npy'), n_pi)
+            # Extract and Save Noisy TDA (Persistence Image)
+            noisy_pi = compute_persistence_image(noisy, tau=tau, dim=dim, grid_size=grid_size)
+            np.save(os.path.join(od, f'{name}_pi.npy'), noisy_pi)
             
         # Add Downsample Variants
         for k in downsample_factors:
             ds = downsample_rr(rr, k)
             od = os.path.join(out_base, f'downsample_{k}')
             os.makedirs(od, exist_ok=True)
+            
+            # Save Downsampled RR
             np.save(os.path.join(od, f'{name}_rr.npy'), ds)
             
-            # Safe Downsampled HRV
-            try:
-                ds_hrv = extract_hrv_features(ds)
-            except:
-                ds_hrv = np.zeros(expected_hrv_dim)
-            np.save(os.path.join(od, f'{name}_hrv.npy'), ds_hrv)
+            # Extract and Save Downsampled HRV
+            np.save(os.path.join(od, f'{name}_hrv.npy'), extract_hrv_features(ds))
             
-            # Safe Downsampled TDA
-            try:
-                ds_pi = compute_persistence_image(ds, tau=tau, dim=dim, grid_size=grid_size)
-                if len(ds_pi) != expected_tda_dim:
-                    ds_pi = np.zeros(expected_tda_dim)
-            except:
-                ds_pi = np.zeros(expected_tda_dim)
+            # Extract and Save Downsampled TDA
+            ds_pi = compute_persistence_image(ds, tau=tau, dim=dim, grid_size=grid_size)
             np.save(os.path.join(od, f'{name}_pi.npy'), ds_pi)
             
         count += 1

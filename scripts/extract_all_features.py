@@ -6,6 +6,7 @@ Usage: python scripts/extract_all_features.py --interim data/interim --raw data/
 import os
 import sys
 import glob
+import re
 import numpy as np
 import pandas as pd
 import argparse
@@ -36,15 +37,18 @@ def main():
 
     hrv_dir = os.path.join(args.out, 'hrv')
     rr_dir = os.path.join(args.out, 'rr_windows')
+    test_rr_dir = os.path.join(args.out, 'test_rr_only')
     os.makedirs(hrv_dir, exist_ok=True)
     os.makedirs(rr_dir, exist_ok=True)
+    os.makedirs(test_rr_dir, exist_ok=True)
 
     interim_files = glob.glob(os.path.join(args.interim, '*_interim.npz'))
     all_rows = []
 
-    # FIX: Changed loop variable to 'npzpath' to match the rest of the block
     for npzpath in sorted(interim_files):
         recname = os.path.basename(npzpath).replace('_interim.npz', '')
+        is_test_record = bool(re.match(r"^x\d{2}$", recname))
+
         data = np.load(npzpath, allow_pickle=True)
         rr = data.get('rr')
         if rr is None or len(rr) == 0:
@@ -73,7 +77,10 @@ def main():
             
             # Save RR window for TDA
             np.save(os.path.join(rr_dir, f"{basename}.npy"), w_clean)
-            
+
+            if is_test_record:
+                np.save(os.path.join(test_rr_dir, f"{basename}.npy"), w_clean)
+                
             # Save HRV features
             feats = extract_hrv_features(w_clean)
             np.save(os.path.join(hrv_dir, f"{basename}_hrv.npy"), feats)

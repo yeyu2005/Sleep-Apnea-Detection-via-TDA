@@ -1,8 +1,8 @@
 """Evaluate robustness on the strictly withheld test set for ALL models in one run.
 
 Usage:
-  python scripts/evaluate_robustness_test_set.py \
-      --noisy_dir data/processed/robustness_test/noise_10.0
+  python scripts/evaluate_robustness_test_set.py --noisy_dir data/processed/robustness_test/downsample_2
+
 """
 import os
 import argparse
@@ -59,7 +59,6 @@ def load_feature_matrices_robust(hrv_dir, tda_dir, labels_csv):
                     valid = True
             except: pass
 
-        # THE FIX: If the file is corrupted/missing, simulate a blank smartwatch signal
         if not valid:
             missing_count += 1
             X_hrv.append(np.zeros(expected_h_dim, dtype=np.float32))
