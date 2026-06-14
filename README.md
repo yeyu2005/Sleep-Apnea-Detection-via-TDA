@@ -79,7 +79,7 @@ python scripts/run_ablation_suite.py --hrv_dir data/processed/hrv --tda_dir data
 Results, metrics (F1, AUC, Sensitivity), and hardware performance logs are saved to experiments/ablations/ablation_summary.json.
 
 ### Step 6: Final State-of-the-Art Test Set Benchmark
-Locks in the winning architecture (TST Fusion), trains a final model on all training records, and evaluates strictly on the unseen x test cohort.
+Trains the final HRV-Only, TDA-Only, and Fusion models on the training cohort and evaluates strictly on the unseen "x" test cohort.
 
 python scripts/evaluate_test_set.py
 
@@ -101,10 +101,14 @@ Calculates how heavily the traditional HRV features degraded under the injected 
 
 python scripts/analyze_robustness.py --orig_hrv data/processed/hrv --rob_dir data/processed/robustness --out experiments/ablations/robustness_summary.csv
 
-### 4.4 Prove Model Resilience (The "Anchor" Effect)
-To prove that Topological features act as a stabilizing anchor against noise, evaluate the Transformer on the degraded dataset.
+### 4.4 Prove Model Resilience
+To prove that Topological features act as a stabilizing anchor against noise, we evaluate the finalized models against severely degraded signals on the unseen test set. This script dynamically zero-imputes destroyed 1-minute segments to preserve the chronological timeline, mimicking a "blank signal" from a smartwatch losing skin contact.
 
-python scripts/run_ablation_suite.py --hrv_dir data/processed/robustness/noise_10.0 --tda_dir data/processed/tda --labels configs/training_labels.csv --outdir experiments/robustness_10ms --arch tst
+First, generate the 50% signal loss dataset:
+python scripts/generate_robustness_variants.py --rr_dir data/processed/test_rr_only --out_dir data/processed/robustness_test --noise 0.0 --downsample 2 --tau 3 --dim 10 --grid_size 32
+
+Then, evaluate the SOTA models against it:
+python scripts/evaluate_robustness_test_set.py --noisy_dir data/processed/robustness_test/downsample_2
 
 
 ## 5. Interpretability
