@@ -98,6 +98,8 @@ First, generate the 50% signal loss dataset:
 
 python scripts/generate_robustness_variants.py --rr_dir data/processed/test_rr_only --out_dir data/processed/robustness_test --noise 0.0 --downsample 2 --tau 3 --dim 10 --grid_size 32
 
+** Please note that test_rr_only directory contains all the processed rr interval for test set, you should copy the "x" series rr interval from rr_window directory to a new folder data/processed/test_rr_only
+
 Then, evaluate the SOTA models against it:
 
 python scripts/evaluate_robustness_test_set.py --noisy_dir data/processed/robustness_test/downsample_2
