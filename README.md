@@ -95,9 +95,11 @@ python scripts/benchmark_inference.py --arch tst --seq_len 5 --iters 100
 To prove that Topological features act as a stabilizing anchor against noise, we evaluate the finalized models against severely degraded signals on the unseen test set. This script dynamically zero-imputes destroyed 1-minute segments to preserve the chronological timeline, mimicking a "blank signal" from a smartwatch losing skin contact.
 
 First, generate the 50% signal loss dataset:
+
 python scripts/generate_robustness_variants.py --rr_dir data/processed/test_rr_only --out_dir data/processed/robustness_test --noise 0.0 --downsample 2 --tau 3 --dim 10 --grid_size 32
 
 Then, evaluate the SOTA models against it:
+
 python scripts/evaluate_robustness_test_set.py --noisy_dir data/processed/robustness_test/downsample_2
 
 
